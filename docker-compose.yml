@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: peak-gaming-db
+    environment:
+      POSTGRES_DB: peak_gaming
+      POSTGRES_USER: peak_gaming
+      POSTGRES_PASSWORD: peak_gaming
+    ports:
+      - "5432:5432"
+    volumes:
+      - peak-gaming-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U peak_gaming -d peak_gaming"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: peak-gaming-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/peak_gaming
+      SPRING_DATASOURCE_USERNAME: peak_gaming
+      SPRING_DATASOURCE_PASSWORD: peak_gaming
+      APP_ADMIN_API_KEY: peak2026
+      APP_CORS_ALLOWED_ORIGINS: http://localhost:3000
+    ports:
+      - "8080:8080"
+
+volumes:
+  peak-gaming-db-data:

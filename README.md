@@ -1,4 +1,6 @@
-Peak Gaming API — booking, availability and admin backend for the Peak Gaming Suceava room, built with Spring Boot (Java 21) and Postgres.
+# Peak Gaming API
+
+Booking, availability and admin backend for the Peak Gaming Suceava room, built with Spring Boot (Java 21) and Postgres. Pairs with [peak-gaming-frontend](https://github.com/peak-gaming/peak-gaming-frontend) — see that repo for the site itself.
 
 ## Architecture
 
@@ -56,9 +58,22 @@ Coverage report: `build/reports/jacoco/test/html/index.html`. `./gradlew check` 
 
 If Testcontainers fails to find a Docker environment, it's usually because it probed the wrong named pipe. Either add `DOCKER_HOST=npipe:////./pipe/dockerDesktopLinuxEngine` to your environment (the `test` task in `build.gradle` forwards it to the test JVM automatically when set), or check `docker context ls` for the pipe your active context actually uses.
 
+## Deploying
+
+Any host that can build the `Dockerfile` and reach a Postgres instance works (Railway, Render, Fly.io, a plain VPS). Environment variables to set:
+
+| Variable | Purpose |
+|---|---|
+| `SPRING_DATASOURCE_URL` | e.g. `jdbc:postgresql://<host>:5432/<db>` |
+| `SPRING_DATASOURCE_USERNAME` / `SPRING_DATASOURCE_PASSWORD` | Postgres credentials |
+| `APP_ADMIN_API_KEY` | admin panel access key — change this from the `peak2026` default in production |
+| `APP_CORS_ALLOWED_ORIGINS` | the deployed frontend's origin, e.g. `https://peak-gaming.vercel.app` |
+
+On Railway specifically: add a Postgres service to the project, then reference its variables on this service (`${{Postgres.PGHOST}}`, etc.) instead of hardcoding them.
+
 ## Frontend integration
 
-The frontend (`../my-app`) talks to this API when `NEXT_PUBLIC_API_URL` is set (see its `.env.local`); otherwise it falls back to browser-only `localStorage`. Endpoint contract:
+The frontend talks to this API when `NEXT_PUBLIC_API_URL` is set (see its `.env.local`); otherwise it falls back to browser-only `localStorage`. Endpoint contract:
 
 | Method | Path | Auth | Used by |
 |---|---|---|---|
@@ -68,4 +83,3 @@ The frontend (`../my-app`) talks to this API when `NEXT_PUBLIC_API_URL` is set (
 | `PATCH` | `/api/rezervari/{id}/stare` | `X-Admin-Key` | admin panel (confirm/cancel) |
 | `GET` | `/api/stations`, `/api/stations/types` | none | (available; not yet consumed by the frontend) |
 | `GET` | `/api/zones` | none | (available; not yet consumed by the frontend) |
-# peak-gaming-backend
