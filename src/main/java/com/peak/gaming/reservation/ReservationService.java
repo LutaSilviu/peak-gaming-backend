@@ -1,6 +1,9 @@
 package com.peak.gaming.reservation;
 
+import com.peak.gaming.config.AppProperties;
+import com.peak.gaming.exception.InvalidBookingWindowException;
 import com.peak.gaming.exception.InvalidPricingException;
+import com.peak.gaming.exception.InvalidStatusTransitionException;
 import com.peak.gaming.exception.NoAvailabilityException;
 import com.peak.gaming.exception.NotFoundException;
 import com.peak.gaming.pricing.PricingService;
@@ -27,6 +30,7 @@ public class ReservationService {
     private final PricingService pricingService;
     private final ConfirmationCodeGenerator codeGenerator;
     private final EntityManager entityManager;
+    private final AppProperties appProperties;
 
     public ReservationService(
             ReservationRepository reservationRepository,
@@ -34,13 +38,15 @@ public class ReservationService {
             StationTypeRepository stationTypeRepository,
             PricingService pricingService,
             ConfirmationCodeGenerator codeGenerator,
-            EntityManager entityManager) {
+            EntityManager entityManager,
+            AppProperties appProperties) {
         this.reservationRepository = reservationRepository;
         this.stationRepository = stationRepository;
         this.stationTypeRepository = stationTypeRepository;
         this.pricingService = pricingService;
         this.codeGenerator = codeGenerator;
         this.entityManager = entityManager;
+        this.appProperties = appProperties;
     }
 
     @Transactional(readOnly = true)
@@ -72,10 +78,12 @@ public class ReservationService {
      */
     @Transactional
     public CreateReservationResponse create(CreateReservationRequest request) {
-        acquireAdvisoryLock(request.data(), request.tip());
+        validateBookingWindow(request);
 
         StationTypeEntity stationType = stationTypeRepository.findById(request.tip())
                 .orElseThrow(() -> new InvalidPricingException("Unknown station type: " + request.tip()));
+
+        acquireAdvisoryLock(request.data(), request.tip());
 
         int units = pricingService.unitsFor(request.tip(), request.persoane(), stationType.getPeoplePerUnit());
 
@@ -124,8 +132,33 @@ public class ReservationService {
     public ReservationDto updateStatus(Long id, ReservationStatus status) {
         Reservation reservation = reservationRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Reservation " + id + " not found"));
+        if (reservation.getStatus() == ReservationStatus.anulata && status == ReservationStatus.confirmata) {
+            throw new InvalidStatusTransitionException(
+                    "Reservation " + id + " was cancelled and can't be confirmed directly; reactivate it first (set it to 'noua')");
+        }
         reservation.setStatus(status);
         return ReservationDto.from(reservation);
+    }
+
+    /**
+     * Rejects bookings the room could never honor: a date in the past, or an
+     * interval that starts before opening or ends after closing. The exact
+     * per-slot availability (is this specific station free) is checked later,
+     * once we hold the advisory lock — this only rules out requests that are
+     * invalid regardless of what else is booked.
+     */
+    private void validateBookingWindow(CreateReservationRequest request) {
+        if (request.data().isBefore(LocalDate.now())) {
+            throw new InvalidBookingWindowException("Reservation date is in the past: " + request.data());
+        }
+        int openHour = appProperties.booking().openHour();
+        int closeHour = appProperties.booking().closeHour();
+        int endHour = request.ora() + request.durata();
+        if (request.ora() < openHour || endHour > closeHour) {
+            throw new InvalidBookingWindowException(
+                    "Booking must fall within opening hours (" + openHour + ":00-" + closeHour + ":00), "
+                            + "got " + request.ora() + ":00-" + endHour + ":00");
+        }
     }
 
     private String nextUniqueCode() {
@@ -136,10 +169,18 @@ public class ReservationService {
         return code;
     }
 
+    /**
+     * Uses Postgres's two-key advisory lock overload rather than combining
+     * (date, stationType) into a single number ourselves — that avoids any
+     * chance of two different (date, stationType) pairs hashing to the same
+     * lock key. epochDay comfortably fits in 32 bits until year ~5,881,580.
+     */
     private void acquireAdvisoryLock(LocalDate date, StationType stationType) {
-        long key = (date.toEpochDay() * 31L) + stationType.ordinal();
-        entityManager.createNativeQuery("SELECT pg_advisory_xact_lock(:key)")
-                .setParameter("key", key)
+        int dateKey = (int) date.toEpochDay();
+        int stationTypeKey = stationType.ordinal();
+        entityManager.createNativeQuery("SELECT pg_advisory_xact_lock(:dateKey, :stationTypeKey)")
+                .setParameter("dateKey", dateKey)
+                .setParameter("stationTypeKey", stationTypeKey)
                 .getSingleResult();
     }
 }

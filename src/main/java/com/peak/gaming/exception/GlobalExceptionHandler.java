@@ -28,6 +28,18 @@ public class GlobalExceptionHandler {
                 .body(ApiErrorResponse.of(422, "Unprocessable Entity", ex.getMessage()));
     }
 
+    @ExceptionHandler(InvalidBookingWindowException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidBookingWindow(InvalidBookingWindowException ex) {
+        return ResponseEntity.status(422)
+                .body(ApiErrorResponse.of(422, "Unprocessable Entity", ex.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidStatusTransitionException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidStatusTransition(InvalidStatusTransitionException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiErrorResponse.of(409, "Conflict", ex.getMessage()));
+    }
+
     @ExceptionHandler(UnauthorizedException.class)
     public ResponseEntity<ApiErrorResponse> handleUnauthorized(UnauthorizedException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)

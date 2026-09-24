@@ -7,7 +7,10 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import com.peak.gaming.config.AppProperties;
+import com.peak.gaming.exception.InvalidBookingWindowException;
 import com.peak.gaming.exception.InvalidPricingException;
+import com.peak.gaming.exception.InvalidStatusTransitionException;
 import com.peak.gaming.exception.NoAvailabilityException;
 import com.peak.gaming.exception.NotFoundException;
 import com.peak.gaming.pricing.PricingService;
@@ -48,11 +51,18 @@ class ReservationServiceTest {
 
     private ReservationService service;
 
+    /** A date far enough in the future to never become "the past" relative to test-run time. */
+    private static final LocalDate FUTURE_DATE = LocalDate.now().plusDays(30);
+
     @BeforeEach
     void setUp() {
+        AppProperties appProperties = new AppProperties(
+                new AppProperties.Admin("test-key"),
+                new AppProperties.Cors("http://localhost:3000"),
+                new AppProperties.Booking(12, 24));
         service = new ReservationService(
                 reservationRepository, stationRepository, stationTypeRepository,
-                pricingService, codeGenerator, entityManager);
+                pricingService, codeGenerator, entityManager, appProperties);
     }
 
     /** Only tests that reach ReservationService#create() take the advisory-lock path. */
@@ -80,7 +90,7 @@ class ReservationServiceTest {
 
     private CreateReservationRequest request(short people, boolean student) {
         return new CreateReservationRequest(
-                StationType.pc, people, student, LocalDate.of(2026, 9, 20),
+                StationType.pc, people, student, FUTURE_DATE,
                 (short) 14, (short) 2, "Andrei Popescu", "0745123456", "website");
     }
 
@@ -139,11 +149,42 @@ class ReservationServiceTest {
 
     @Test
     void rejectsUnknownStationType() {
-        stubAdvisoryLock();
+        // No stubAdvisoryLock(): station-type lookup now happens before the
+        // advisory lock is acquired, so this never reaches that code path.
         when(stationTypeRepository.findById(StationType.pc)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.create(request((short) 2, false)))
                 .isInstanceOf(InvalidPricingException.class);
+    }
+
+    @Test
+    void rejectsReservationDateInThePast() {
+        CreateReservationRequest pastRequest = new CreateReservationRequest(
+                StationType.pc, (short) 2, false, LocalDate.now().minusDays(1),
+                (short) 14, (short) 2, "Andrei Popescu", "0745123456", "website");
+
+        assertThatThrownBy(() -> service.create(pastRequest))
+                .isInstanceOf(InvalidBookingWindowException.class);
+    }
+
+    @Test
+    void rejectsStartHourBeforeOpening() {
+        CreateReservationRequest tooEarly = new CreateReservationRequest(
+                StationType.pc, (short) 2, false, FUTURE_DATE,
+                (short) 8, (short) 2, "Andrei Popescu", "0745123456", "website");
+
+        assertThatThrownBy(() -> service.create(tooEarly))
+                .isInstanceOf(InvalidBookingWindowException.class);
+    }
+
+    @Test
+    void rejectsIntervalExtendingPastClosing() {
+        CreateReservationRequest tooLate = new CreateReservationRequest(
+                StationType.pc, (short) 2, false, FUTURE_DATE,
+                (short) 23, (short) 3, "Andrei Popescu", "0745123456", "website");
+
+        assertThatThrownBy(() -> service.create(tooLate))
+                .isInstanceOf(InvalidBookingWindowException.class);
     }
 
     @Test
@@ -156,6 +197,17 @@ class ReservationServiceTest {
         ReservationDto result = service.updateStatus(1L, ReservationStatus.confirmata);
 
         assertThat(result.stare()).isEqualTo(ReservationStatus.confirmata);
+    }
+
+    @Test
+    void rejectsConfirmingAReservationThatWasAlreadyCancelled() {
+        Reservation reservation = new Reservation();
+        reservation.setId(1L);
+        reservation.setStatus(ReservationStatus.anulata);
+        when(reservationRepository.findById(1L)).thenReturn(Optional.of(reservation));
+
+        assertThatThrownBy(() -> service.updateStatus(1L, ReservationStatus.confirmata))
+                .isInstanceOf(InvalidStatusTransitionException.class);
     }
 
     @Test

@@ -63,7 +63,7 @@ class ReservationControllerIntegrationTest extends PostgresIntegrationTest {
     @Test
     void createsReservationAndReturnsAssignedStations() {
         ResponseEntity<CreateReservationResponse> response = restTemplate.postForEntity(
-                "/api/rezervari", jsonBody(bookingPayload("pc", 1, 10, 1, "0745111111")),
+                "/api/rezervari", jsonBody(bookingPayload("pc", 1, 13, 1, "0745111111")),
                 CreateReservationResponse.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
@@ -74,7 +74,7 @@ class ReservationControllerIntegrationTest extends PostgresIntegrationTest {
 
     @Test
     void listsReservationsCreatedForADate() {
-        createBooking("ps5", 2, 11, 1, "0745222222");
+        createBooking("ps5", 2, 13, 1, "0745222222");
 
         ResponseEntity<DayReservationsResponse> response = restTemplate.getForEntity(
                 "/api/rezervari?data=" + TEST_DATE, DayReservationsResponse.class);
